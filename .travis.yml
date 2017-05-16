@@ -1,0 +1,15 @@
+language: php
+php:
+  - '5.4'
+  - '5.5'
+  - '5.6'
+  - '7.0'
+  - '7.1'
+  - nightly
+  - hhvm
+before_script:
+  - COMPOSER_DISABLE_XDEBUG_WARN=1 composer install --prefer-dist
+script:
+  - COMPOSER_DISABLE_XDEBUG_WARN=1 TABLESCHEMA_ENABLE_FRAGILE_TESTS=1 composer test
+after_success:
+  - '[ "$TRAVIS_PHP_VERSION" == "7.1" ] && vendor/bin/coveralls'
