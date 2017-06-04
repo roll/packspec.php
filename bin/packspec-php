@@ -1,4 +1,4 @@
 #!/usr/bin/env php
 
 <?php
-require_once(__DIR__ . '/packspec/packspec/src/cli.php');
+require_once(__DIR__ . '/../src/cli.php');
