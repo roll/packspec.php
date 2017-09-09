@@ -1,5 +1,5 @@
 <?php
-namespace roll\packspec;
+namespace packspec\packspec;
 use Colors\Color;
 use Spatie\Emoji\Emoji;
 use Symfony\Component\Yaml\Yaml;
@@ -10,60 +10,71 @@ require_once('vendor/autoload.php');
 
 function parse_specs($path) {
 
-    // Specs
-    $specmap = [];
-    // TODO: support recursive glob
-    foreach(glob("{$path}/*.yml") as $filepath) {
-        $filecont = file_get_contents($filepath);
-        $spec = parse_spec($filecont);
-        if (!$spec) {
-            continue;
-        } else if (!in_array($spec['package'], $specmap)) {
-            $specmap[$spec['package']] = $spec;
-        } else {
-            array_merge($specmap[$spec['package']]['features'], $spec['features']);
+    // Paths
+    $paths = [];
+    if ($path) {
+        if (is_file($path)) {
+            $paths = [path];
+        } else if (is_dir($path)) {
+            $paths = glob("{$path}/*.yml");
         }
+    } else {
+        if (!$paths) {$paths = glob("packspec.yml");}
+        if (!$paths) {$paths = glob("packspec/*.yml");}
     }
 
-    // Hooks
-    // TODO: implement
-
-    // Result
-    // TODO: sort
-    $specs = array_values($specmap);
+    // Specs
+    $specs = [];
+    foreach($paths as $path) {
+        $spec = parse_spec($path);
+        if ($spec) {
+            array_push($specs, $spec);
+        }
+    }
 
     return $specs;
 
 }
 
 
-function parse_spec($spec) {
+function parse_spec($path) {
+    // TODO: support user scope
 
     // Package
-    $contents = Yaml::parse($spec);
+    $document = Yaml::parse(file_get_contents($path));
     try {
-        $feature = parse_feature($contents[0]);
-        $package = $feature['result'];
-        assert($feature['assign'] == 'PACKAGE');
-        assert(!$feature['skip']);
-    } catch (Exception $exception) {
-        return null;
-    }
+        $feature = parse_feature($document[0]);
+        if ($feature['skip']) {return null;}
+    } catch (\Exception $exception) {return null;}
+    $package = $feature['comment'];
 
     // Features
+    $skip = false;
     $features = [];
-    foreach($contents as $feature){
+    foreach($document as $feature){
         $feature = parse_feature($feature);
         array_push($features, $feature);
+        if ($feature['comment']) {
+            $skip = $feature['skip'];
+        }
+        $skip = $skip || $feature['skip'];
     }
 
     // Scope
     $scope = [];
-    $fcqns = @get_all_fqcns();
-    foreach($fcqns as $item) {
-        if (strpos($item, "\\{$package}\\") != false) {
-            $name = array_values(array_slice(explode('\\', $item), -1))[0];
-            $scope[$name] = $item;
+    $scope['$import'] = function ($package){return builtin_import($package);};
+
+    // Stats
+    $stats = ['features' => 0, 'comments' => 0, 'skipped' => 0, 'tests' => 0];
+    foreach ($features as $feature) {
+        $stats['features'] += 1;
+        if ($feature['comment']) {
+            $stats['comments'] += 1;
+        } else {
+            $stats['tests'] += 1;
+            if ($feature['skip']) {
+                $stats['skipped'] += 1;
+            }
         }
     }
 
@@ -71,14 +82,23 @@ function parse_spec($spec) {
         'package' => $package,
         'features' => $features,
         'scope' => $scope,
+        'stats' => $stats,
     ];
 
 }
 
 
 function parse_feature($feature) {
+
+    # General
     if (gettype($feature) == 'string') {
-        return ['comment' => $feature];
+        preg_match('/^(?:\((.*)\))?(\w.*)$/', $feature, $match);
+        $skip = isset($match[1]) ? $match[1] : null;
+        $comment = isset($match[2]) ? $match[2] : null;
+        if ($skip) {
+            $skip = !in_array('php', explode('|', $skip));
+        }
+        return ['comment' => $comment, 'skip' => $skip];
     }
     foreach(array_slice($feature, 0, 1) as $key => $value) {
         $left = $key;
@@ -88,16 +108,15 @@ function parse_feature($feature) {
     // Left side
     $left = camelize($left);
     $call = false;
-    preg_match('/^(?:(.*):)?(?:([^=]*)=)?([^=].*)?$/', $left, $match);
+    preg_match('/^(?:\((.*)\))?(?:([^=]*)=)?([^=].*)?$/', $left, $match);
     $skip = isset($match[1]) ? $match[1] : null;
     $assign = isset($match[2]) ? $match[2] : null;
     $property = isset($match[3]) ? $match[3] : null;
     if ($skip) {
-        $filters = explode(':', $skip);
-        $skip = ($filters[0] == 'not') == in_array('php', $filters);
+        $skip = !in_array('php', explode('|', $skip));
     }
     if (!$assign && !$property) {
-        throw new Exception('Non-valid feature');
+        throw new \Exception('Non-valid feature');
     }
     if ($property) {
         $call = true;
@@ -172,27 +191,38 @@ function parse_feature($feature) {
 
 
 function test_specs($specs) {
-    $success = true;
+
+    // Message
     $colorize = new Color();
     $message = $colorize("\n #  PHP\n")->bold() . PHP_EOL;
     print($message);
+
+
+    // Tests specs
+    $success = true;
     foreach($specs as $spec) {
         $spec_success = test_spec($spec);
         $success = $success and $spec_success;
     }
+
     return $success;
 }
 
 
 function test_spec($spec) {
-    $passed = 0;
-    $amount = count($spec['features']);
+
+    // Message
     $message = str_repeat(Emoji::heavyMinusSign(), 3) . "\n";
     print($message);
+
+    // Test spec
+    $passed = 0;
     foreach($spec['features'] as $feature) {
         $passed += test_feature($feature, $spec['scope']);
     }
-    $success = ($passed == $amount);
+    $success = ($passed == $spec['stats']['features']);
+
+    // Message
     $color = 'green';
     $colorize = new Color();
     $message = $colorize("\n\n " . Emoji::heavyCheckMark() . '  ')->green()->bold() . '';
@@ -200,8 +230,11 @@ function test_spec($spec) {
         $color = 'red';
         $message = $colorize("\n\n " . Emoji::crossMark() . '  ')->red()->bold() . '';
     }
-    $message .= $colorize("{$spec['package']}: {$passed}/{$amount}\n")->fg($color)->bold() . PHP_EOL;
+    $tests_passed = $passed - $spec['stats']['comments'] - $spec['stats']['skipped'];
+    $tests_count = $spec['stats']['tests'] - $spec['stats']['skipped'];
+    $message .= $colorize("{$spec['package']}: {$tests_passed}/{$tests_count}\n")->fg($color)->bold() . PHP_EOL;
     print($message);
+
     return $success;
 }
 
@@ -226,27 +259,34 @@ function test_feature($feature, &$scope) {
         return true;
     }
 
-    // Execute
-    // TODO: dereference feature
+    // Dereference
+    // TODO: dereference arguments and result
+
+    # Execute
+    $exception = null;
     $result = $feature['result'];
     if ($feature['property']) {
         try {
-            // TODO: implement properly and with nested attributes
-            if (strpos($feature['property'], '.')) {
-                $parts = explode('.', $feature['property']);
-                $object = $scope[$parts[0]];
-                $method = $parts[1];
+            $property = $scope;
+            foreach(explode('.', $feature['property']) as $name) {
+                [$object, $property] = get_property($property, $name);
+                if ($object) {break;}
+            }
+            if (is_string($object)) {
                 if ($feature['call']) {
-                    $result = $object->$method(...$feature['args']);
+                    $result = $object::$property(...$feature['args']);
                 } else {
-                    $result = $object->$method();
+                    $result = $object::$property();
+                }
+            } else if ($object) {
+                if ($feature['call']) {
+                    $result = $object->$property(...$feature['args']);
+                } else {
+                    $result = $object->$property();
                 }
             } else {
-                $property = $scope[$feature['property']];
                 if ($feature['call']) {
                     if (gettype($property) == 'string') {
-                        // TODO: REMOVE! only to showcase for tableschema
-                        $feature['args'][0] = (object)$feature['args'][0];
                         $result = new $property(...$feature['args']);
                     } else {
                         $result = $property(...$feature['args']);
@@ -255,7 +295,8 @@ function test_feature($feature, &$scope) {
                     $result = $property;
                 }
             }
-        } catch (Exception $exception) {
+        } catch (\Exception $exc) {
+            $exception = $exc;
             $result = 'ERROR';
         }
     }
@@ -263,12 +304,10 @@ function test_feature($feature, &$scope) {
     // Assign
     if ($feature['assign']) {
         // TODO: implement nested assign
-        // TODO: ensure immutable constants
         $scope[$feature['assign']] = $result;
     }
 
     // Compare
-    // TODO: isoformat value
     $success = ($feature['result']) ? $result == $feature['result'] : $result != 'ERROR';
     if ($success) {
         $colorize = new Color();
@@ -278,16 +317,58 @@ function test_feature($feature, &$scope) {
     } else {
         try {
             $result_text = json_encode($result);
-        } catch (Exception $exception) {
+        } catch (\Exception $exception) {
             $result_text = (string)$result;
         }
         $colorize = new Color();
         $message = $colorize(' ' . Emoji::crossMark() . '  ')->red();
         $message .= $feature['text'] . ' # ' . $result_text  . "\n";
+        if ($exception) {
+            $message .= $colorize("Exception: {$exception->getMessage()}\n")->red()->bold();
+        } else {
+            $feature_result_text = json_encode($feature['result']);
+            $message .= $colorize("Assertion: {$result_text} != {$feature_result_text}\n")->red()->bold();
+        }
         print($message);
     }
 
     return $success;
+}
+
+
+function builtin_import($package) {
+    $attributes = [];
+    $fcqns = @get_all_fqcns();
+    foreach($fcqns as $item) {
+        if (strpos($item, "\\{$package}\\") != false) {
+            $name = array_values(array_slice(explode('\\', $item), -1))[0];
+            $attributes[$name] = $item;
+        }
+    }
+    return $attributes;
+}
+
+
+function get_property($owner, $name) {
+    // print("\n---");
+    // print("\n---");
+    // print("\n---\n");
+    // print_r($owner);
+    // print("\n---\n");
+    // print_r($name);
+    // print("\n---");
+    // print("\n---");
+    // print("\n---\n");
+    if (is_array($owner) && !array_key_exists($name, $owner)) {
+        throw new \Exception("No {$name} in the scope");
+    } else if (is_array($owner)) {
+        $object = null;
+        $property = $owner[$name];
+    } else {
+        $object = $owner;
+        $property = $name;
+    }
+    return [$object, $property];
 }
 
 
