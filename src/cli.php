@@ -213,7 +213,7 @@ function test_specs($specs) {
     $success = true;
     foreach($specs as $spec) {
         $spec_success = test_spec($spec);
-        $success = $success and $spec_success;
+        $success = $success && $spec_success;
     }
 
     return $success;
@@ -251,10 +251,6 @@ function test_spec($spec) {
 
 
 function test_feature($feature, &$scope) {
-    // print_r("\n---\n");
-    // print_r($feature);
-    // print_r($scope);
-    // print_r("\n---\n");
 
     // Comment
     if ($feature['comment']) {
@@ -279,13 +275,7 @@ function test_feature($feature, &$scope) {
         $feature['args'] = dereference_value($feature['args'], $scope);
         $feature['kwargs'] = dereference_value($feature['kwargs'], $scope);
     }
-    // print_r("\n---\n");
-    // print_r($feature);
-    // print_r("\n---\n");
     $feature['result'] = dereference_value($feature['result'], $scope);
-    // print_r("\n---\n");
-    // print_r($feature);
-    // print_r("\n---\n");
 
     # Execute
     $exception = null;
@@ -319,6 +309,9 @@ function test_feature($feature, &$scope) {
                             && in_array($property, get_declared_classes()))  {
                         $result = new $property(...$args);
                     } else {
+                        if (!in_array($property, get_defined_functions()['user'])) {
+                            throw new \Exception('Call to undefined function');
+                        }
                         $result = $property(...$args);
                     }
                 } else {
@@ -326,7 +319,6 @@ function test_feature($feature, &$scope) {
                 }
             }
         } catch (\Exception $exc) {
-            throw $exc;
             $exception = $exc;
             $result = 'ERROR';
         }
@@ -401,10 +393,6 @@ function dereference_value($value, $scope) {
 
 
 function get_property($owner, $name) {
-    // print_r("\n---\n");
-    // print_r($owner);
-    // print_r($name);
-    // print_r("\n---\n");
     if (is_array($owner)
             && !array_key_exists($name, $owner)
             && !array_key_exists(strtolower($name), $owner)) {
