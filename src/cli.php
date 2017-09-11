@@ -14,7 +14,7 @@ function parse_specs($path) {
     $paths = [];
     if ($path) {
         if (is_file($path)) {
-            $paths = [path];
+            $paths = [$path];
         } else if (is_dir($path)) {
             $paths = glob("{$path}/*.yml");
         }
@@ -38,31 +38,42 @@ function parse_specs($path) {
 
 
 function parse_spec($path) {
-    // TODO: support user scope
 
     // Package
-    $document = Yaml::parse(file_get_contents($path));
+    $contents = explode("---\n", file_get_contents($path));
+    // PHP Yaml doesn't support set type like {value}
+    $contents[0] = preg_replace('/{([\w$]+)}/', '{$1: null}', $contents[0]);
+    $document1 = Yaml::parse($contents[0]);
+    $document2 = (count($contents) > 1) ? Yaml::parse($contents[1]) : null;
     try {
-        $feature = parse_feature($document[0]);
+        $feature = parse_feature($document1[0]);
         if ($feature['skip']) {return null;}
-    } catch (\Exception $exception) {return null;}
+    } catch (\Exception $exception) {
+        return null;
+    }
     $package = $feature['comment'];
 
     // Features
     $skip = false;
     $features = [];
-    foreach($document as $feature){
+    foreach($document1 as $feature){
         $feature = parse_feature($feature);
-        array_push($features, $feature);
         if ($feature['comment']) {
             $skip = $feature['skip'];
         }
-        $skip = $skip || $feature['skip'];
+        $feature['skip'] = $skip || $feature['skip'];
+        array_push($features, $feature);
     }
 
     // Scope
     $scope = [];
     $scope['$import'] = function ($package){return builtin_import($package);};
+    if ($document2 && array_key_exists('php', $document2)) {
+        $userScope = get_user_scope($document2['php']);
+        foreach ($userScope as $name => $value) {
+            $scope["$${value}"] = $value;
+        }
+    }
 
     // Stats
     $stats = ['features' => 0, 'comments' => 0, 'skipped' => 0, 'tests' => 0];
@@ -144,6 +155,7 @@ function parse_feature($feature) {
                 }
                 if (substr($item_left, -1) == '=') {
                     $kwargs[substr($item_left, 0, -1)] = $item_right;
+                    continue;
                 }
             }
             array_push($args, $item);
@@ -172,8 +184,7 @@ function parse_feature($feature) {
         $result_text = json_encode($result);
         $text = "{$text} == ${result_text}";
     }
-    // TODO: replace
-    // text = re.sub(r'{"([^{}]*?)": null}', r'\1', text)
+    $text = preg_replace('/{"([^{}]*?)":null}/', '$1', $text);
 
     return [
         'comment' => null,
@@ -240,6 +251,10 @@ function test_spec($spec) {
 
 
 function test_feature($feature, &$scope) {
+    // print_r("\n---\n");
+    // print_r($feature);
+    // print_r($scope);
+    // print_r("\n---\n");
 
     // Comment
     if ($feature['comment']) {
@@ -260,7 +275,17 @@ function test_feature($feature, &$scope) {
     }
 
     // Dereference
-    // TODO: dereference arguments and result
+    if ($feature['call']) {
+        $feature['args'] = dereference_value($feature['args'], $scope);
+        $feature['kwargs'] = dereference_value($feature['kwargs'], $scope);
+    }
+    // print_r("\n---\n");
+    // print_r($feature);
+    // print_r("\n---\n");
+    $feature['result'] = dereference_value($feature['result'], $scope);
+    // print_r("\n---\n");
+    // print_r($feature);
+    // print_r("\n---\n");
 
     # Execute
     $exception = null;
@@ -268,34 +293,40 @@ function test_feature($feature, &$scope) {
     if ($feature['property']) {
         try {
             $property = $scope;
+            $args = $feature['args'];
+            if (count($feature['kwargs'])) {
+                array_push($args, $feature['kwargs']);
+            }
             foreach(explode('.', $feature['property']) as $name) {
                 [$object, $property] = get_property($property, $name);
                 if ($object) {break;}
             }
             if (is_string($object)) {
                 if ($feature['call']) {
-                    $result = $object::$property(...$feature['args']);
+                    $result = $object::$property(...$args);
                 } else {
                     $result = $object::$property();
                 }
             } else if ($object) {
                 if ($feature['call']) {
-                    $result = $object->$property(...$feature['args']);
+                    $result = $object->$property(...$args);
                 } else {
                     $result = $object->$property();
                 }
             } else {
                 if ($feature['call']) {
-                    if (gettype($property) == 'string') {
-                        $result = new $property(...$feature['args']);
+                    if (gettype($property) == 'string'
+                            && in_array($property, get_declared_classes()))  {
+                        $result = new $property(...$args);
                     } else {
-                        $result = $property(...$feature['args']);
+                        $result = $property(...$args);
                     }
                 } else {
                     $result = $property;
                 }
             }
         } catch (\Exception $exc) {
+            throw $exc;
             $exception = $exc;
             $result = 'ERROR';
         }
@@ -303,8 +334,11 @@ function test_feature($feature, &$scope) {
 
     // Assign
     if ($feature['assign']) {
-        // TODO: implement nested assign
-        $scope[$feature['assign']] = $result;
+        $temp = &$scope;
+        foreach(explode('.', $feature['assign']) as $name) {
+            $temp = &$temp[$name];
+        }
+        $temp = $result;
     }
 
     // Compare
@@ -349,26 +383,49 @@ function builtin_import($package) {
 }
 
 
+function dereference_value($value, $scope) {
+    if (is_array($value) && count($value) == 1 && array_values($value)[0] == null) {
+        $result = $scope;
+        foreach(explode('.', array_keys($value)[0]) as $name) {
+            [$object, $property] = get_property($result, $name);
+            $result = $property;
+        }
+        $value = $result;
+    } else if (is_array($value)) {
+        foreach($value as $key => $item) {
+            $value[$key] = dereference_value($item, $scope);
+        }
+    }
+    return $value;
+}
+
+
 function get_property($owner, $name) {
-    // print("\n---");
-    // print("\n---");
-    // print("\n---\n");
+    // print_r("\n---\n");
     // print_r($owner);
-    // print("\n---\n");
     // print_r($name);
-    // print("\n---");
-    // print("\n---");
-    // print("\n---\n");
-    if (is_array($owner) && !array_key_exists($name, $owner)) {
+    // print_r("\n---\n");
+    if (is_array($owner)
+            && !array_key_exists($name, $owner)
+            && !array_key_exists(strtolower($name), $owner)) {
         throw new \Exception("No {$name} in the scope");
     } else if (is_array($owner)) {
         $object = null;
-        $property = $owner[$name];
+        if (array_key_exists($name, $owner)) {
+            $property = $owner[$name];
+        } else {
+            $property = $owner[strtolower($name)];
+        }
     } else {
         $object = $owner;
         $property = $name;
     }
     return [$object, $property];
+}
+
+
+function set_property($owner, $name, $value) {
+
 }
 
 
@@ -400,6 +457,21 @@ function get_all_fqcns() {
         }
     }
     return $fqcns;
+}
+
+
+function get_user_scope($code) {
+    $classes1 = get_declared_classes();
+    $functions1 = get_defined_functions();
+    $vars1 = get_defined_vars();
+    eval($code);
+    $classes2 = get_declared_classes();
+    $functions2 = get_defined_functions();
+    $vars2 = get_defined_vars();
+    $classes = @array_diff($classes2, $classes1);
+    $functions = @array_diff($functions2['user'], $functions1['user']);
+    $vars = @array_diff($vars2, $vars1);
+    return array_merge($vars, $functions, $classes);
 }
 
 

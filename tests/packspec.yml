@@ -1,0 +1,76 @@
+- value
+
+- value=: 'value'
+- value==: 'value'
+
+- class
+
+- class=: {$TestClass}
+- (py)class.static_property==: {value}
+- class.static_method: [==: {value}]
+
+- instance
+
+- instance=$TestClass: ['value']
+- (py|js|rb)instance.property==: 'value'
+- instance.method: [==: 'value']
+- (py|js)instance.name=: 'value'
+- (py|js)instance.name==: 'value'
+
+- function
+
+- result=$test_function: ['value', suffix=: '!']
+- result==: 'VALUE!'
+
+- object
+
+- object=: {'key': 'value'}
+- object.nested=: {'key': 'value'}
+- object.nested.key==: 'value'
+- object.key==: 'value'
+
+- array
+
+- array=: ['value', 'nested']
+- array.1=: ['value']
+- array.1.0==: 'value'
+- array.0==: 'value'
+
+- filter
+
+- (xx)value==: 'FAIL'
+
+- (py)import
+
+- json=$import: ['json']
+- json.dumps: [{value}, ==: '"value"']
+
+---
+
+php: |
+
+  class TestClass {
+
+    public static $staticProperty = 'value';
+
+    public static function staticMethod() {
+      return 'value';
+    }
+
+    public function __construct($value) {
+      $this->value = $value;
+    }
+
+    public function property() {
+      return $this->value;
+    }
+
+    public function method() {
+      return $this->value;
+    }
+
+  }
+
+  function testFunction($value, $options) {
+    return strtoupper($value) . @$options['suffix'];
+  }
