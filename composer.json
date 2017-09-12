@@ -1,6 +1,6 @@
 {
     "name": "packspec/packspec",
-    "description": "packspec-php",
+    "description": "Cross-language testings made easy: unified YML-based package specification and Python/JavaScript/Ruby/PHP test runners",
     "license": "MIT",
     "bin": [
         "bin/packspec-php"
