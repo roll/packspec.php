@@ -201,7 +201,7 @@ function parse_feature($feature) {
 }
 
 
-function test_specs($specs, $exitFirst) {
+function test_specs($specs, $exitFirst=false) {
 
     // Message
     $colorize = new Color();
@@ -220,7 +220,7 @@ function test_specs($specs, $exitFirst) {
 }
 
 
-function test_spec($spec, $exitFirst) {
+function test_spec($spec, $exitFirst=false) {
 
     // Message
     $message = str_repeat(Emoji::heavyMinusSign(), 3) . "\n";
@@ -250,7 +250,7 @@ function test_spec($spec, $exitFirst) {
 }
 
 
-function test_feature($feature, &$scope, $exitFirst) {
+function test_feature($feature, &$scope, $exitFirst=false) {
 
     // Comment
     if ($feature['comment']) {
