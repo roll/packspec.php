@@ -201,7 +201,7 @@ function parse_feature($feature) {
 }
 
 
-function test_specs($specs) {
+function test_specs($specs, $exitFirst) {
 
     // Message
     $colorize = new Color();
@@ -212,7 +212,7 @@ function test_specs($specs) {
     // Tests specs
     $success = true;
     foreach($specs as $spec) {
-        $spec_success = test_spec($spec);
+        $spec_success = test_spec($spec, $exitFirst);
         $success = $success && $spec_success;
     }
 
@@ -220,7 +220,7 @@ function test_specs($specs) {
 }
 
 
-function test_spec($spec) {
+function test_spec($spec, $exitFirst) {
 
     // Message
     $message = str_repeat(Emoji::heavyMinusSign(), 3) . "\n";
@@ -229,7 +229,7 @@ function test_spec($spec) {
     // Test spec
     $passed = 0;
     foreach($spec['features'] as $feature) {
-        $passed += test_feature($feature, $spec['scope']);
+        $passed += test_feature($feature, $spec['scope'], $exitFirst);
     }
     $success = ($passed == $spec['stats']['features']);
 
@@ -250,7 +250,7 @@ function test_spec($spec) {
 }
 
 
-function test_feature($feature, &$scope) {
+function test_feature($feature, &$scope, $exitFirst) {
 
     // Comment
     if ($feature['comment']) {
@@ -356,6 +356,17 @@ function test_feature($feature, &$scope) {
             $message .= $colorize("Assertion: {$result_text} != {$feature_result_text}\n")->red()->bold();
         }
         print($message);
+        if ($exitFirst) {
+            print("---\n");
+            print("Scope (current execution scope):\n");
+            print("[" . join(', ', array_keys($scope)) . "]\n");
+            if ($exception) {
+                print("---\n");
+                throw $exception;
+            } else {
+                exit(1);
+            }
+        }
     }
 
     return $success;
@@ -474,5 +485,9 @@ function camelize($input, $separator = '_') {
 // Main program
 
 $path = isset($argv[1]) ? $argv[1] : '.';
+$exitFirst = in_array('-x', $argv) || in_array('--exit-first', $argv);
 $specs = parse_specs($path);
-$success = test_specs($specs);
+$success = test_specs($specs, $exitFirst);
+if (!$success) {
+    exit(1);
+}
