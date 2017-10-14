@@ -1,5 +1,5 @@
-/vendor/
-/.idea/
-/coverage-clover.xml
-/composer.lock
-/composer.phar
+vendor/
+.idea/
+coverage-clover.xml
+composer.lock
+composer
